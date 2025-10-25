@@ -2,7 +2,7 @@
 
 **An AI-powered voice diary and emotional companion that listens, remembers, and cares.**
 
-> 🏆 **Winner - First Place** at [Voice AI Hackathon 2025]
+> 🏆 **Winner - First Place** at [Layercode Voice AI Hackathon at Cloudflare 2025]
 
 EchoDiary is a voice-first journaling application that lets you share your thoughts and feelings through natural phone conversations. It uses advanced AI to understand your emotions, build a knowledge graph of your life, and provide empathetic responses in real-time.
 
