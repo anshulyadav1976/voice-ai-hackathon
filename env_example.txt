@@ -1,0 +1,112 @@
+# EchoDiary Environment Variables
+# Copy this file to .env and fill in your actual values
+
+# ============================================
+# Application Settings
+# ============================================
+APP_NAME=EchoDiary
+APP_VERSION=1.0.0
+DEBUG=True
+HOST=0.0.0.0
+PORT=8000
+
+# ============================================
+# Database
+# ============================================
+DATABASE_URL=sqlite+aiosqlite:///./echodiary.db
+
+# ============================================
+# Upstash Redis (Session & Context Cache)
+# Get from: https://console.upstash.com/
+# ============================================
+UPSTASH_REDIS_URL=https://your-redis-instance.upstash.io
+UPSTASH_REDIS_TOKEN=your_upstash_redis_token_here
+
+# ============================================
+# Deepgram (Speech-to-Text)
+# Get from: https://console.deepgram.com/
+# ============================================
+DEEPGRAM_API_KEY=your_deepgram_api_key_here
+
+# ============================================
+# Rime (Text-to-Speech)
+# Get from: https://rime.ai/
+# ============================================
+RIME_API_KEY=your_rime_api_key_here
+RIME_API_URL=https://api.rime.ai/v1
+
+# ============================================
+# Twilio (Voice & SMS)
+# Get from: https://console.twilio.com/
+# ============================================
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=your_twilio_auth_token_here
+TWILIO_PHONE_NUMBER=+1234567890
+TWILIO_WEBHOOK_BASE_URL=https://your-domain.com
+
+# Note: TWILIO_WEBHOOK_BASE_URL should be your public URL
+# Local dev: use ngrok (https://ngrok.com)
+# Production: use your deployed URL
+
+# ============================================
+# OpenAI (GPT-5-Nano / GPT-4)
+# Get from: https://platform.openai.com/
+# ============================================
+OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+OPENAI_MODEL=gpt-4-turbo-preview
+OPENAI_MAX_TOKENS=100
+OPENAI_TEMPERATURE=0.7
+
+# ============================================
+# Layercode (Optional - Service Orchestration)
+# Get from: https://layercode.com/
+# ============================================
+LAYERCODE_API_KEY=your_layercode_api_key_here
+
+# ============================================
+# Session Settings
+# ============================================
+SESSION_TTL_SECONDS=7200
+CONTEXT_TURNS_LIMIT=3
+
+# ============================================
+# Mood Scoring & Check-ins
+# ============================================
+MOOD_NEGATIVE_THRESHOLD=3.0
+CHECKIN_DELAY_HOURS=24
+
+# ============================================
+# Audio Storage
+# ============================================
+AUDIO_STORAGE_PATH=./audio_recordings
+
+# ============================================
+# SETUP INSTRUCTIONS
+# ============================================
+# 
+# 1. Copy this file to .env:
+#    cp env_example.txt .env
+#
+# 2. Sign up for each service and get API keys:
+#    - Deepgram: https://console.deepgram.com/signup
+#    - Rime: https://rime.ai/
+#    - Twilio: https://www.twilio.com/try-twilio
+#    - OpenAI: https://platform.openai.com/signup
+#    - Upstash: https://console.upstash.com/
+#
+# 3. For Twilio:
+#    - Provision a phone number
+#    - Set webhook URL after deployment
+#    - For local dev, use ngrok: ngrok http 8000
+#
+# 4. For local development:
+#    TWILIO_WEBHOOK_BASE_URL=https://abc123.ngrok.io
+#
+# 5. For production:
+#    TWILIO_WEBHOOK_BASE_URL=https://your-app.railway.app
+#
+# 6. Save the file and run:
+#    uvicorn app.main:app --reload
+#
+# ============================================
+

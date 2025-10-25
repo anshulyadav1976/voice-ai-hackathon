@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EchoDiary - Knowledge Graph</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div>
+                <h1>🎙️ EchoDiary</h1>
+                <p class="subtitle">Your Life Knowledge Graph</p>
+            </div>
+        </div>
+        <nav class="container">
+            <a href="/">Call History</a>
+            <a href="/graph.html" class="active">Knowledge Graph</a>
+            <a href="/stats.html">Statistics</a>
+        </nav>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div>
+                    <h2 class="card-title" style="margin: 0;">Knowledge Graph</h2>
+                    <p style="color: #6B7280; margin: 4px 0 0 0;">
+                        Visualizing people, places, emotions, and events from your conversations
+                    </p>
+                </div>
+                <button class="btn btn-secondary" onclick="loadGraph()" style="margin: 0;">🔄 Refresh</button>
+            </div>
+            
+            <div id="knowledge-graph"></div>
+            
+            <div id="graph-loading" class="loading">
+                <div class="spinner"></div>
+                <p>Loading your knowledge graph...</p>
+            </div>
+            
+            <div id="graph-stats" style="margin-top: 16px; padding: 12px; background: #F3F4F6; border-radius: 8px; display: none;">
+                <strong>Graph Stats:</strong>
+                <span id="stats-text"></span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">Legend</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; border-radius: 50%; background: #4F46E5;"></div>
+                    <span>Person</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; border-radius: 50%; background: #10B981;"></div>
+                    <span>Place</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; border-radius: 50%; background: #F59E0B;"></div>
+                    <span>Organization</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; border-radius: 50%; background: #EF4444;"></div>
+                    <span>Emotion</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; border-radius: 50%; background: #8B5CF6;"></div>
+                    <span>Topic</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Color mapping for entity types
+        const colorMap = {
+            'Person': '#4F46E5',
+            'Place': '#10B981',
+            'Org': '#F59E0B',
+            'Emotion': '#EF4444',
+            'Topic': '#8B5CF6'
+        };
+
+        async function loadGraph() {
+            try {
+                // Clear previous graph
+                document.getElementById('knowledge-graph').innerHTML = '';
+                document.getElementById('graph-loading').style.display = 'flex';
+                document.getElementById('graph-stats').style.display = 'none';
+                
+                const response = await fetch('/api/graph');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Graph data received:', data);
+                
+                document.getElementById('graph-loading').style.display = 'none';
+                
+                // Show stats
+                const statsDiv = document.getElementById('graph-stats');
+                const statsText = document.getElementById('stats-text');
+                statsText.textContent = ` ${data.nodes.length} entities, ${data.edges.length} relationships`;
+                statsDiv.style.display = 'block';
+                
+                if (data.nodes.length === 0) {
+                    document.getElementById('knowledge-graph').innerHTML = 
+                        '<p style="text-align: center; color: #6B7280; padding: 60px;">No entities yet. Make some calls to build your knowledge graph!<br><br>After a call ends, entities are automatically extracted.</p>';
+                    return;
+                }
+                
+                renderGraph(data);
+                
+            } catch (error) {
+                console.error('Error loading graph:', error);
+                document.getElementById('graph-loading').innerHTML = 
+                    '<p style="color: #EF4444;">Error loading knowledge graph: ' + error.message + '</p>';
+            }
+        }
+
+        function renderGraph(data) {
+            const width = document.getElementById('knowledge-graph').offsetWidth;
+            const height = 600;
+            
+            // Create SVG
+            const svg = d3.select('#knowledge-graph')
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+            
+            // Create force simulation
+            const simulation = d3.forceSimulation(data.nodes)
+                .force('link', d3.forceLink(data.edges)
+                    .id(d => d.id)
+                    .distance(100))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(30));
+            
+            // Create links
+            const link = svg.append('g')
+                .selectAll('line')
+                .data(data.edges)
+                .join('line')
+                .attr('class', 'link')
+                .attr('stroke-width', d => Math.sqrt(d.value || 1));
+            
+            // Create nodes
+            const node = svg.append('g')
+                .selectAll('g')
+                .data(data.nodes)
+                .join('g')
+                .attr('class', 'node')
+                .call(drag(simulation));
+            
+            // Add circles to nodes
+            node.append('circle')
+                .attr('r', d => 5 + (d.mention_count || 1) * 2)
+                .attr('fill', d => colorMap[d.entity_type] || '#6B7280')
+                .attr('opacity', 0.8);
+            
+            // Add labels
+            node.append('text')
+                .text(d => d.name)
+                .attr('x', 12)
+                .attr('y', 4)
+                .style('font-size', '12px')
+                .style('fill', '#374151');
+            
+            // Add title tooltip
+            node.append('title')
+                .text(d => `${d.name} (${d.entity_type})\nMentioned ${d.mention_count} times`);
+            
+            // Update positions on each tick
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+                
+                node
+                    .attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+            
+            // Drag behavior
+            function drag(simulation) {
+                function dragstarted(event) {
+                    if (!event.active) simulation.alphaTarget(0.3).restart();
+                    event.subject.fx = event.subject.x;
+                    event.subject.fy = event.subject.y;
+                }
+                
+                function dragged(event) {
+                    event.subject.fx = event.x;
+                    event.subject.fy = event.y;
+                }
+                
+                function dragended(event) {
+                    if (!event.active) simulation.alphaTarget(0);
+                    event.subject.fx = null;
+                    event.subject.fy = null;
+                }
+                
+                return d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended);
+            }
+        }
+
+        loadGraph();
+    </script>
+</body>
+</html>
+

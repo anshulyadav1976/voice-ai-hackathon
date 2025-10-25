@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EchoDiary - Call History</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div>
+                <h1>🎙️ EchoDiary</h1>
+                <p class="subtitle">Your voice-first emotional companion</p>
+            </div>
+        </div>
+        <nav class="container">
+            <a href="/" class="active">Call History</a>
+            <a href="/graph.html">Knowledge Graph</a>
+            <a href="/stats.html">Statistics</a>
+        </nav>
+    </header>
+
+    <div class="container">
+        <div class="stats-grid" id="stats">
+            <!-- Stats will be loaded here -->
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">Recent Calls</h2>
+            <div id="calls-list">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading calls...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load stats
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats/1'); // TODO: Dynamic user ID
+                const data = await response.json();
+                
+                document.getElementById('stats').innerHTML = `
+                    <div class="stat-card">
+                        <div class="stat-value">${data.total_calls}</div>
+                        <div class="stat-label">Total Calls</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${data.average_mood.toFixed(1)}</div>
+                        <div class="stat-label">Average Mood</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${data.mood_trend.length > 0 ? data.mood_trend[0].mood.toFixed(1) : 'N/A'}</div>
+                        <div class="stat-label">Latest Mood</div>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        // Load calls
+        async function loadCalls() {
+            try {
+                const response = await fetch('/api/calls?limit=20');
+                const calls = await response.json();
+                
+                const callsList = document.getElementById('calls-list');
+                
+                if (calls.length === 0) {
+                    callsList.innerHTML = '<p style="text-align: center; color: #6B7280;">No calls yet. Dial your EchoDiary number to get started!</p>';
+                    return;
+                }
+                
+                callsList.innerHTML = calls.map(call => {
+                    const date = new Date(call.start_time);
+                    const moodClass = call.mood_score 
+                        ? (call.mood_score >= 7 ? 'mood-positive' : call.mood_score >= 4 ? 'mood-neutral' : 'mood-negative')
+                        : 'mood-neutral';
+                    
+                    return `
+                        <div class="call-item" onclick="viewCall(${call.id})">
+                            <div class="call-info">
+                                <div class="call-date">${date.toLocaleString()}</div>
+                                <div class="call-summary">${call.summary || 'Conversation about daily experiences'}</div>
+                                ${call.tags ? `
+                                    <div class="tags">
+                                        ${call.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+                                    </div>
+                                ` : ''}
+                            </div>
+                            <div class="call-meta">
+                                ${call.mood_score ? `
+                                    <span class="mood-badge ${moodClass}">
+                                        ${call.mood_score.toFixed(1)} / 10
+                                    </span>
+                                ` : ''}
+                                <span class="tag">${call.mode}</span>
+                                <span class="tag">${call.duration_seconds ? Math.floor(call.duration_seconds / 60) + 'm' : 'Active'}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+            } catch (error) {
+                console.error('Error loading calls:', error);
+                document.getElementById('calls-list').innerHTML = '<p style="text-align: center; color: #EF4444;">Error loading calls</p>';
+            }
+        }
+
+        function viewCall(callId) {
+            window.location.href = `/call.html?id=${callId}`;
+        }
+
+        // Load on page load
+        loadStats();
+        loadCalls();
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EchoDiary - Statistics</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div>
+                <h1>🎙️ EchoDiary</h1>
+                <p class="subtitle">Your Emotional Journey</p>
+            </div>
+        </div>
+        <nav class="container">
+            <a href="/">Call History</a>
+            <a href="/graph.html">Knowledge Graph</a>
+            <a href="/stats.html" class="active">Statistics</a>
+        </nav>
+    </header>
+
+    <div class="container">
+        <!-- Overall Stats Card -->
+        <div class="card">
+            <h2 class="card-title">📊 Overview</h2>
+            <div id="stats-loading" class="loading">
+                <div class="spinner"></div>
+                <p>Loading statistics...</p>
+            </div>
+            <div id="stats-overview" style="display: none;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+                    <div style="text-align: center; padding: 20px; background: #EEF2FF; border-radius: 8px;">
+                        <div style="font-size: 36px; font-weight: bold; color: #4F46E5;" id="total-calls">0</div>
+                        <div style="color: #6B7280; margin-top: 8px;">Total Calls</div>
+                    </div>
+                    <div style="text-align: center; padding: 20px; background: #F0FDF4; border-radius: 8px;">
+                        <div style="font-size: 36px; font-weight: bold; color: #10B981;" id="avg-mood">0.0</div>
+                        <div style="color: #6B7280; margin-top: 8px;">Average Mood</div>
+                    </div>
+                    <div style="text-align: center; padding: 20px; background: #FEF3C7; border-radius: 8px;">
+                        <div style="font-size: 36px; font-weight: bold; color: #F59E0B;" id="mood-trend">→</div>
+                        <div style="color: #6B7280; margin-top: 8px;">Mood Trend</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mood Timeline Chart -->
+        <div class="card">
+            <h2 class="card-title">📈 Mood Over Time</h2>
+            <div id="chart-container" style="display: none;">
+                <canvas id="mood-chart" style="max-height: 400px;"></canvas>
+            </div>
+            <div id="chart-empty" style="display: none; text-align: center; color: #6B7280; padding: 40px;">
+                No mood data yet. Complete a call to see your emotional journey!
+            </div>
+        </div>
+
+        <!-- Insights Card -->
+        <div class="card">
+            <h2 class="card-title">💡 Insights</h2>
+            <div id="insights" style="display: none;">
+                <!-- Insights will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Assuming user_id = 1 for demo (in production, get from auth)
+        const userId = 1;
+        let moodChart = null;
+
+        async function loadStats() {
+            try {
+                const response = await fetch(`/api/stats/${userId}`);
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load statistics');
+                }
+                
+                const data = await response.json();
+                console.log('Stats data:', data);
+                
+                document.getElementById('stats-loading').style.display = 'none';
+                document.getElementById('stats-overview').style.display = 'block';
+                
+                // Update overview
+                document.getElementById('total-calls').textContent = data.total_calls;
+                document.getElementById('avg-mood').textContent = data.average_mood.toFixed(1);
+                
+                // Calculate trend
+                if (data.mood_trend && data.mood_trend.length > 1) {
+                    const recent = data.mood_trend.slice(0, Math.min(3, data.mood_trend.length));
+                    const older = data.mood_trend.slice(Math.min(3, data.mood_trend.length));
+                    
+                    const recentAvg = recent.reduce((sum, m) => sum + m.mood, 0) / recent.length;
+                    const olderAvg = older.length > 0 ? older.reduce((sum, m) => sum + m.mood, 0) / older.length : recentAvg;
+                    
+                    let trendSymbol = '→';
+                    let trendColor = '#F59E0B';
+                    
+                    if (recentAvg > olderAvg + 0.5) {
+                        trendSymbol = '↗';
+                        trendColor = '#10B981';
+                    } else if (recentAvg < olderAvg - 0.5) {
+                        trendSymbol = '↘';
+                        trendColor = '#EF4444';
+                    }
+                    
+                    const trendEl = document.getElementById('mood-trend');
+                    trendEl.textContent = trendSymbol;
+                    trendEl.style.color = trendColor;
+                }
+                
+                // Render mood chart
+                if (data.mood_trend && data.mood_trend.length > 0) {
+                    renderMoodChart(data.mood_trend);
+                    document.getElementById('chart-container').style.display = 'block';
+                } else {
+                    document.getElementById('chart-empty').style.display = 'block';
+                }
+                
+                // Generate insights
+                generateInsights(data);
+                
+            } catch (error) {
+                console.error('Error loading stats:', error);
+                document.getElementById('stats-loading').innerHTML = 
+                    '<p style="color: #EF4444;">Error loading statistics</p>';
+            }
+        }
+
+        function renderMoodChart(moodData) {
+            const ctx = document.getElementById('mood-chart').getContext('2d');
+            
+            // Reverse to show oldest to newest
+            const reversedData = [...moodData].reverse();
+            
+            const labels = reversedData.map(m => {
+                const date = new Date(m.date);
+                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            });
+            
+            const scores = reversedData.map(m => m.mood);
+            
+            if (moodChart) {
+                moodChart.destroy();
+            }
+            
+            moodChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Mood Score',
+                        data: scores,
+                        borderColor: '#4F46E5',
+                        backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 5,
+                        pointHoverRadius: 7
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return 'Mood: ' + context.parsed.y.toFixed(1) + ' / 10';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 10,
+                            ticks: {
+                                stepSize: 2
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function generateInsights(data) {
+            const insightsDiv = document.getElementById('insights');
+            let insights = [];
+            
+            // Insight 1: Overall mood assessment
+            if (data.average_mood >= 7) {
+                insights.push({
+                    icon: '😊',
+                    text: `You're doing great! Your average mood is ${data.average_mood.toFixed(1)}/10.`,
+                    color: '#10B981'
+                });
+            } else if (data.average_mood >= 4) {
+                insights.push({
+                    icon: '😐',
+                    text: `Your mood is balanced at ${data.average_mood.toFixed(1)}/10. Keep checking in.`,
+                    color: '#F59E0B'
+                });
+            } else {
+                insights.push({
+                    icon: '💙',
+                    text: `Your mood has been challenging at ${data.average_mood.toFixed(1)}/10. I'm here for you.`,
+                    color: '#4F46E5'
+                });
+            }
+            
+            // Insight 2: Call frequency
+            if (data.total_calls >= 10) {
+                insights.push({
+                    icon: '🎯',
+                    text: `You've made ${data.total_calls} calls! Consistent reflection builds emotional awareness.`,
+                    color: '#4F46E5'
+                });
+            } else if (data.total_calls >= 5) {
+                insights.push({
+                    icon: '🌱',
+                    text: `${data.total_calls} calls so far. You're building a healthy habit!`,
+                    color: '#10B981'
+                });
+            }
+            
+            // Insight 3: Recent trend
+            if (data.mood_trend && data.mood_trend.length >= 3) {
+                const recentMoods = data.mood_trend.slice(0, 3).map(m => m.mood);
+                const isImproving = recentMoods[0] > recentMoods[2];
+                
+                if (isImproving) {
+                    insights.push({
+                        icon: '📈',
+                        text: 'Your mood has been improving recently. Keep up the great work!',
+                        color: '#10B981'
+                    });
+                }
+            }
+            
+            // Render insights
+            insightsDiv.innerHTML = insights.map(insight => `
+                <div style="display: flex; align-items: start; gap: 12px; padding: 16px; background: ${insight.color}10; border-left: 4px solid ${insight.color}; border-radius: 8px; margin-bottom: 12px;">
+                    <div style="font-size: 24px;">${insight.icon}</div>
+                    <div style="flex: 1;">
+                        <p style="margin: 0; line-height: 1.6;">${insight.text}</p>
+                    </div>
+                </div>
+            `).join('');
+            
+            insightsDiv.style.display = 'block';
+        }
+
+        loadStats();
+    </script>
+</body>
+</html>
+
