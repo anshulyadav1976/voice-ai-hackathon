@@ -45,8 +45,25 @@
 
         <div class="card">
             <h2 class="card-title">Actions</h2>
-            <button class="btn btn-primary" onclick="generateReflection()" id="reflection-btn">🎵 Generate Reflection</button>
-            <button class="btn btn-secondary" onclick="reconversate()">📞 Call Me About This</button>
+            <div style="display: grid; gap: 12px;">
+                <button class="btn btn-primary" onclick="generateReflection()" id="reflection-btn">🎵 Generate Reflection</button>
+                <button class="btn btn-secondary" onclick="reconversate()">📞 Call Me About This</button>
+                
+                <div style="margin-top: 8px; border-top: 1px solid #E5E7EB; padding-top: 12px;">
+                    <p style="font-weight: 600; margin-bottom: 12px; color: #374151;">📥 Download & Export</p>
+                    <div style="display: grid; gap: 8px;">
+                        <button class="btn btn-secondary" onclick="downloadAudio()" id="audio-download-btn">
+                            🎵 Download Audio Recording
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportTranscript('text')">
+                            📄 Export as Text
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportTranscript('markdown')">
+                            📝 Export as Markdown
+                        </button>
+                    </div>
+                </div>
+            </div>
             
             <div id="reflection-result" style="margin-top: 16px; display: none;">
                 <div style="background: #F3F4F6; padding: 16px; border-radius: 8px; margin-bottom: 12px;">
@@ -202,6 +219,100 @@
 
         function reconversate() {
             alert('Feature coming soon! This will initiate an outbound call to discuss this conversation further.');
+        }
+
+        async function downloadAudio() {
+            const btn = document.getElementById('audio-download-btn');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳ Downloading...';
+            
+            try {
+                // Try to download audio file with download flag
+                const response = await fetch(`/api/calls/${callId}/audio?download=true`);
+                
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        throw new Error('Audio recording not available yet. It will be available after the call ends.');
+                    }
+                    throw new Error(`Failed to download audio: ${response.statusText}`);
+                }
+                
+                // Check if it's a direct file or a URL
+                const contentType = response.headers.get('content-type');
+                
+                if (contentType && contentType.includes('audio')) {
+                    // Direct file download
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    
+                    // Get filename from Content-Disposition header if available
+                    const disposition = response.headers.get('content-disposition');
+                    let filename = `echodiary_call_${callId}.wav`;
+                    if (disposition && disposition.includes('filename=')) {
+                        const matches = disposition.match(/filename="?([^"]+)"?/);
+                        if (matches && matches[1]) {
+                            filename = matches[1];
+                        }
+                    }
+                    
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    // Cleanup
+                    setTimeout(() => {
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                    }, 100);
+                    
+                    btn.textContent = '✅ Downloaded!';
+                    setTimeout(() => {
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                    }, 2000);
+                } else {
+                    // URL response (fallback)
+                    const data = await response.json();
+                    if (data.audio_url) {
+                        // Open in new tab for external URLs
+                        window.open(data.audio_url, '_blank');
+                        btn.textContent = '✅ Opened in new tab!';
+                        setTimeout(() => {
+                            btn.disabled = false;
+                            btn.textContent = originalText;
+                        }, 2000);
+                    } else {
+                        throw new Error('No audio URL available');
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Error downloading audio:', error);
+                alert(`⚠️ ${error.message || 'Audio recording not available for this call.'}`);
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
+        async function exportTranscript(format) {
+            try {
+                // Trigger download
+                const url = `/api/calls/${callId}/export/${format}`;
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = true;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+            } catch (error) {
+                console.error('Error exporting transcript:', error);
+                alert('⚠️ Failed to export transcript. Please try again.');
+            }
         }
 
         loadCallDetails();

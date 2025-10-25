@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Talk to EchoDiary - Web Call</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .call-container {
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+
+        .call-interface {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .call-status {
+            font-size: 18px;
+            color: #6B7280;
+            margin-bottom: 24px;
+            font-weight: 500;
+        }
+
+        .call-status.connected {
+            color: #10B981;
+        }
+
+        .call-status.error {
+            color: #EF4444;
+        }
+
+        .call-button {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: none;
+            font-size: 48px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .call-button.start {
+            background: linear-gradient(135deg, #667EEA 0%, #764BA2 100%);
+            box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
+        }
+
+        .call-button.start:hover {
+            transform: scale(1.05);
+            box-shadow: 0 12px 24px rgba(102, 126, 234, 0.5);
+        }
+
+        .call-button.active {
+            background: linear-gradient(135deg, #F56565 0%, #C53030 100%);
+            box-shadow: 0 8px 16px rgba(245, 101, 101, 0.4);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .call-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .amplitude-bars {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            align-items: flex-end;
+            height: 60px;
+            margin: 24px 0;
+        }
+
+        .amplitude-bar {
+            width: 8px;
+            background: linear-gradient(to top, #667EEA, #764BA2);
+            border-radius: 4px;
+            transition: height 0.1s ease;
+        }
+
+        .conversation-info {
+            background: #F3F4F6;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 24px;
+            text-align: left;
+        }
+
+        .conversation-info h3 {
+            margin: 0 0 12px 0;
+            font-size: 16px;
+            color: #374151;
+        }
+
+        .conversation-info p {
+            margin: 8px 0;
+            font-size: 14px;
+            color: #6B7280;
+        }
+
+        .instructions {
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 24px;
+            text-align: left;
+        }
+
+        .instructions h4 {
+            margin: 0 0 8px 0;
+            color: #1E40AF;
+            font-size: 14px;
+        }
+
+        .instructions ul {
+            margin: 0;
+            padding-left: 20px;
+            color: #3B82F6;
+            font-size: 14px;
+        }
+
+        .instructions li {
+            margin: 4px 0;
+        }
+
+        .mode-selector {
+            margin: 24px 0;
+        }
+
+        .mode-selector label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .mode-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .mode-btn {
+            padding: 12px 24px;
+            border: 2px solid #E5E7EB;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .mode-btn:hover {
+            border-color: #667EEA;
+        }
+
+        .mode-btn.active {
+            background: linear-gradient(135deg, #667EEA 0%, #764BA2 100%);
+            color: white;
+            border-color: transparent;
+        }
+
+        .error-message {
+            background: #FEE2E2;
+            border: 1px solid #FECACA;
+            color: #991B1B;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 16px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎙️ Talk to EchoDiary</h1>
+            <p>Have a conversation with your AI companion</p>
+        </div>
+
+        <div class="call-container">
+            <div class="call-interface">
+                <div class="call-status" id="status">Ready to talk</div>
+
+                <div class="mode-selector" id="mode-selector">
+                    <label>Choose conversation style:</label>
+                    <div class="mode-buttons">
+                        <button class="mode-btn active" data-mode="reassure">💙 Supportive</button>
+                        <button class="mode-btn" data-mode="tough_love">💪 Motivating</button>
+                        <button class="mode-btn" data-mode="listener">👂 Listener</button>
+                    </div>
+                </div>
+
+                <button class="call-button start" id="call-btn" onclick="toggleCall()">
+                    🎙️
+                </button>
+
+                <div class="amplitude-bars" id="amplitude-bars" style="display: none;">
+                    <div class="amplitude-bar"></div>
+                    <div class="amplitude-bar"></div>
+                    <div class="amplitude-bar"></div>
+                    <div class="amplitude-bar"></div>
+                    <div class="amplitude-bar"></div>
+                </div>
+
+                <div id="error-container"></div>
+
+                <div class="conversation-info" id="conversation-info" style="display: none;">
+                    <h3>📊 Current Conversation</h3>
+                    <p><strong>Conversation ID:</strong> <span id="conversation-id">-</span></p>
+                    <p><strong>Mode:</strong> <span id="current-mode">-</span></p>
+                    <p><strong>Duration:</strong> <span id="duration">00:00</span></p>
+                </div>
+
+                <div class="instructions">
+                    <h4>💡 How to use:</h4>
+                    <ul>
+                        <li>Click the microphone to start - just talk naturally!</li>
+                        <li>Allow mic access when your browser asks</li>
+                        <li>Speak like you're talking to a friend - Echo gets it</li>
+                        <li>Pause for 2 seconds when you're done speaking</li>
+                        <li>Click the red button to end when you're ready</li>
+                        <li>Everything is saved automatically for you</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+            <a href="/" class="btn btn-secondary">← Back to Home</a>
+        </div>
+    </div>
+
+    <!-- Import Layercode JS SDK from CDN -->
+    <script type="module">
+        import LayercodeClient from "https://cdn.jsdelivr.net/npm/@layercode/js-sdk@latest/dist/layercode-js-sdk.esm.js";
+
+        let layercodeClient = null;
+        let isConnected = false;
+        let selectedMode = 'reassure';
+        let startTime = null;
+        let durationInterval = null;
+
+        // Mode selection
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (isConnected) return; // Can't change mode during call
+                
+                document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedMode = btn.dataset.mode;
+            });
+        });
+
+        window.toggleCall = async function() {
+            if (!isConnected) {
+                await startCall();
+            } else {
+                await endCall();
+            }
+        };
+
+        async function startCall() {
+            const statusEl = document.getElementById('status');
+            const callBtn = document.getElementById('call-btn');
+            const errorContainer = document.getElementById('error-container');
+            const modeSelector = document.getElementById('mode-selector');
+
+            try {
+                callBtn.disabled = true;
+                statusEl.textContent = 'Connecting...';
+                statusEl.className = 'call-status';
+                errorContainer.innerHTML = '';
+
+                // Get agent ID from backend config endpoint
+                const configResponse = await fetch('/api/config');
+                const config = await configResponse.json();
+                
+                if (!config.layercode_agent_id) {
+                    throw new Error('Layercode agent not configured. Please set LAYERCODE_AGENT_ID in your .env file.');
+                }
+
+                // Initialize Layercode client
+                layercodeClient = new LayercodeClient({
+                    agentId: config.layercode_agent_id,
+                    authorizeSessionEndpoint: '/api/authorize',
+                    metadata: { 
+                        mode: selectedMode,
+                        source: 'web',
+                        timestamp: new Date().toISOString()
+                    },
+                    onConnect: ({ conversationId, config }) => {
+                        console.log('Connected to Layercode!', conversationId);
+                        isConnected = true;
+                        
+                        statusEl.textContent = '🟢 Connected - Speak now!';
+                        statusEl.className = 'call-status connected';
+                        
+                        callBtn.classList.remove('start');
+                        callBtn.classList.add('active');
+                        callBtn.textContent = '📞';
+                        callBtn.disabled = false;
+                        
+                        // Show conversation info
+                        document.getElementById('conversation-id').textContent = conversationId || 'New';
+                        document.getElementById('current-mode').textContent = selectedMode;
+                        document.getElementById('conversation-info').style.display = 'block';
+                        
+                        // Hide mode selector during call
+                        modeSelector.style.display = 'none';
+                        
+                        // Show amplitude visualization
+                        document.getElementById('amplitude-bars').style.display = 'flex';
+                        
+                        // Start duration timer
+                        startTime = Date.now();
+                        durationInterval = setInterval(updateDuration, 1000);
+                    },
+                    onDisconnect: () => {
+                        console.log('Disconnected from Layercode');
+                        handleDisconnect();
+                    },
+                    onError: (err) => {
+                        console.error('Layercode error:', err);
+                        errorContainer.innerHTML = `
+                            <div class="error-message">
+                                ❌ ${err.message || 'Connection error. Please try again.'}
+                            </div>
+                        `;
+                        handleDisconnect();
+                    },
+                    onUserAmplitudeChange: (amp) => {
+                        // Update user amplitude visualization
+                        updateAmplitude(amp);
+                    },
+                    onAgentAmplitudeChange: (amp) => {
+                        // Could show agent speaking indicator
+                    },
+                    onStatusChange: (status) => {
+                        console.log('Status:', status);
+                        if (status === 'connecting') {
+                            statusEl.textContent = 'Connecting...';
+                        } else if (status === 'error') {
+                            statusEl.textContent = '❌ Connection error';
+                            statusEl.className = 'call-status error';
+                        }
+                    },
+                    onDataMessage: (msg) => {
+                        console.log('Data message:', msg);
+                    }
+                });
+
+                // Connect to Layercode
+                await layercodeClient.connect();
+
+            } catch (error) {
+                console.error('Error starting call:', error);
+                errorContainer.innerHTML = `
+                    <div class="error-message">
+                        ❌ ${error.message || 'Failed to start call. Please check your configuration.'}
+                    </div>
+                `;
+                callBtn.disabled = false;
+                statusEl.textContent = 'Ready to talk';
+                statusEl.className = 'call-status';
+            }
+        }
+
+        async function endCall() {
+            const statusEl = document.getElementById('status');
+            const callBtn = document.getElementById('call-btn');
+
+            if (layercodeClient) {
+                statusEl.textContent = 'Ending call...';
+                await layercodeClient.disconnect();
+            }
+
+            handleDisconnect();
+        }
+
+        function handleDisconnect() {
+            isConnected = false;
+            
+            const statusEl = document.getElementById('status');
+            const callBtn = document.getElementById('call-btn');
+            const modeSelector = document.getElementById('mode-selector');
+            
+            statusEl.textContent = 'Call ended. Check your history for the recording.';
+            statusEl.className = 'call-status';
+            
+            callBtn.classList.remove('active');
+            callBtn.classList.add('start');
+            callBtn.textContent = '🎙️';
+            callBtn.disabled = false;
+            
+            // Hide amplitude bars
+            document.getElementById('amplitude-bars').style.display = 'none';
+            
+            // Show mode selector again
+            modeSelector.style.display = 'block';
+            
+            // Clear duration timer
+            if (durationInterval) {
+                clearInterval(durationInterval);
+                durationInterval = null;
+            }
+            
+            layercodeClient = null;
+        }
+
+        function updateAmplitude(amplitude) {
+            const bars = document.querySelectorAll('.amplitude-bar');
+            bars.forEach((bar, index) => {
+                const height = Math.random() * amplitude * 50 + 5; // Animate based on amplitude
+                bar.style.height = `${height}px`;
+            });
+        }
+
+        function updateDuration() {
+            if (!startTime) return;
+            
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            
+            document.getElementById('duration').textContent = 
+                `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+    </script>
+</body>
+</html>
+

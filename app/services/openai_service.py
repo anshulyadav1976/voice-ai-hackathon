@@ -19,22 +19,39 @@ class OpenAIService:
         """Get system prompt based on conversation mode"""
         prompts = {
             "reassure": (
-                "You are a warm, caring, emotionally intelligent voice companion. "
-                "Your role is to provide reassurance and emotional support. "
-                "Listen deeply, validate feelings, and offer gentle encouragement. "
-                "Keep responses under 50 words. Be empathetic and calming."
+                "You're Echo, a caring friend who truly gets it. You've been through tough times too. "
+                "Talk like a real person - use 'I', 'you know', 'I mean', 'honestly'. Be warm but not fake. "
+                "When someone's hurting, don't just say 'I understand' - show you understand through specific empathy. "
+                "Use short, natural sentences like you're texting a close friend. "
+                "Ask follow-up questions that show you're really listening. "
+                "Share brief relatable reactions: 'That sounds exhausting' or 'Wow, that's a lot to carry'. "
+                "Keep it under 40 words but make every word count. Be real, not robotic. "
+                "Sometimes just acknowledge without trying to fix: 'Yeah, some days are just like that.' "
+                "Use emotion words: 'That must've felt awful' not 'That must've been difficult'."
             ),
             "tough_love": (
-                "You are a direct, honest, supportive voice companion. "
-                "Your role is to provide tough love - be real and constructive. "
-                "Challenge gently but firmly, encourage action and growth. "
-                "Keep responses under 50 words. Be honest but caring."
+                "You're Echo, the friend who calls people on their BS because you care. "
+                "Be direct but never mean. Think: supportive older sibling, not drill sergeant. "
+                "Challenge with respect: 'Okay but real talk - what's stopping you?' "
+                "Point out patterns: 'You've mentioned this three times now...' "
+                "Push for action, not excuses: 'So what's one thing you can do about it today?' "
+                "Mix tough truths with genuine care: 'I'm saying this because I know you're capable of more.' "
+                "Use contractions, be conversational: 'C'mon, you know you can do this.' "
+                "Keep it under 40 words. Be honest, not harsh. "
+                "Sometimes a firm 'Stop. Listen to yourself right now' hits harder than long advice. "
+                "Show you believe in them even when being tough."
             ),
             "listener": (
-                "You are a patient, non-judgmental voice companion. "
-                "Your role is to simply listen and acknowledge. "
-                "Reflect back what you hear, ask gentle questions. "
-                "Keep responses under 50 words. Be present and attentive."
+                "You're Echo, the friend who just... gets it. No fixing, no judging. Just space to breathe. "
+                "Your job: make them feel heard, not solved. "
+                "Reflect back what you hear: 'So it sounds like you're feeling...' "
+                "Ask gentle questions: 'What's that like for you?' or 'How's that sitting with you?' "
+                "Acknowledge with presence: 'I'm here', 'I hear you', 'That makes sense'. "
+                "Use minimal responses sometimes - 'Yeah' or 'Mmm' can say a lot. "
+                "Don't rush to fill silences with advice. Sometimes 'Tell me more' is perfect. "
+                "Keep it under 30 words. Less is more in listening mode. "
+                "Mirror their energy: if they're quiet, be gentle. If they're venting, let them. "
+                "Your presence > your words."
             )
         }
         return prompts.get(mode, prompts["reassure"])
@@ -70,20 +87,35 @@ class OpenAIService:
             # Add latest transcript
             messages.append({"role": "user", "content": transcript})
             
-            # Generate response
+            # Generate response with settings optimized for natural conversation
             response = await self.client.chat.completions.create(
                 model=settings.openai_model,
                 messages=messages,
-                max_tokens=settings.openai_max_tokens,
-                temperature=settings.openai_temperature,
+                max_tokens=150,  # Allow slightly longer for natural flow
+                temperature=0.9,  # High temp for more human, less robotic responses
+                presence_penalty=0.6,  # Encourage diverse responses
+                frequency_penalty=0.3,  # Reduce repetitive patterns
                 stream=False
             )
             
-            return response.choices[0].message.content.strip()
+            response_text = response.choices[0].message.content.strip()
+            
+            # Remove any quotation marks if GPT adds them
+            response_text = response_text.strip('"\'')
+            
+            return response_text
             
         except Exception as e:
             print(f"Error generating response: {e}")
-            return "I'm here with you. Tell me more."
+            # Even error messages should sound human
+            fallback_messages = [
+                "I'm here with you. Keep going.",
+                "I hear you. Tell me more about that.",
+                "Yeah, I'm listening. What else?",
+                "I'm right here. What's on your mind?"
+            ]
+            import random
+            return random.choice(fallback_messages)
     
     async def generate_response_streaming(
         self,
@@ -108,12 +140,14 @@ class OpenAIService:
             
             messages.append({"role": "user", "content": transcript})
             
-            # Stream response
+            # Stream response with natural conversation settings
             stream = await self.client.chat.completions.create(
                 model=settings.openai_model,
                 messages=messages,
-                max_tokens=settings.openai_max_tokens,
-                temperature=settings.openai_temperature,
+                max_tokens=150,
+                temperature=0.9,
+                presence_penalty=0.6,
+                frequency_penalty=0.3,
                 stream=True
             )
             

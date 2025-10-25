@@ -13,6 +13,7 @@ from app.models import User, Call, Transcript
 from app.redis_client import redis_client
 from app.services.openai_service import OpenAIService
 from app.services.layercode_service import LayercodeService
+from app.services.audio_service import AudioService
 from app.tasks import extract_and_store_entities, calculate_and_store_mood
 from sqlalchemy import select
 
@@ -20,6 +21,7 @@ router = APIRouter()
 
 openai_service = OpenAIService()
 layercode_service = LayercodeService()
+audio_service = AudioService()
 
 
 @router.post("/webhook/transcript")
@@ -50,11 +52,18 @@ async def handle_transcript_webhook(request: Request):
             return await handle_session_start(data)
         elif event_type == "session.end" or event_type == "session.complete":
             return await handle_session_end(data)
-        elif event_type in ["message", "transcript", "session.update"]:
+        elif event_type == "session.update":
+            # Handle recording URL and other updates separately
+            return await handle_session_update(data)
+        elif event_type in ["message", "transcript", "user.transcript"]:
+            # Only process actual message events
             return await handle_message(data)
         else:
             print(f"⚠️ Unknown event type: {event_type}")
-            return {"status": "ok", "action": "continue"}
+            # Return empty SSE stream for unknown events
+            async def empty_stream():
+                yield "data: {}\n\n"
+            return StreamingResponse(empty_stream(), media_type="text/event-stream")
         
     except Exception as e:
         print(f"❌ Error in webhook: {e}")
@@ -67,7 +76,9 @@ async def handle_transcript_webhook(request: Request):
             response_data = json.dumps({
                 "type": "response.tts",
                 "content": "I'm here with you. Please continue.",
-                "turn_id": turn_id
+                "turn_id": turn_id,
+                "emotion": "calm",  # Calm, reassuring tone for errors
+                "speaker": "default"
             })
             yield f"data: {response_data}\n\n"
             
@@ -90,12 +101,22 @@ async def handle_session_start(data: Dict[str, Any]) -> StreamingResponse:
     
     # Return SSE stream with welcome message
     async def welcome_stream():
-        welcome_text = "Welcome to Echo Diary. I'm here to listen. How are you feeling today?"
+        # More natural, varied welcome messages
+        import random
+        welcomes = [
+            "Hey, I'm Echo. I'm here for you. What's on your mind?",
+            "Hi! I'm Echo. Just so you know, this is your space. What's going on?",
+            "Hey there! I'm Echo, and I'm all ears. What's happening with you?",
+            "Hi! I'm Echo. Whatever you need to talk about, I'm here. What's up?"
+        ]
+        welcome_text = random.choice(welcomes)
         
         response_data = json.dumps({
             "type": "response.tts",
             "content": welcome_text,
-            "turn_id": turn_id
+            "turn_id": turn_id,
+            "emotion": "warm",  # Warm, welcoming tone for Rime
+            "speaker": "default"
         })
         yield f"data: {response_data}\n\n"
         
@@ -105,23 +126,86 @@ async def handle_session_start(data: Dict[str, Any]) -> StreamingResponse:
     return StreamingResponse(welcome_stream(), media_type="text/event-stream")
 
 
-async def handle_session_end(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle session.end event"""
+async def handle_session_end(data: Dict[str, Any]) -> StreamingResponse:
+    """Handle session.end event - must return SSE stream"""
     print(f"👋 Session ending: {data}")
     
     session_id = data.get("session_id") or data.get("call_id", "unknown")
+    turn_id = data.get("turn_id", session_id)
     
-    # Cleanup will happen in background
-    # For now, just acknowledge
-    return {"status": "ok", "message": "Session ended"}
+    # Process the full transcript if available
+    transcript_data = data.get("transcript", [])
+    if transcript_data:
+        print(f"📝 Full transcript received: {len(transcript_data)} turns")
+    
+    # Check for audio recording URL from Layercode (might come here or in session.update)
+    audio_url = data.get("recording_url") or data.get("audio_url")
+    
+    if audio_url:
+        print(f"🎵 Audio recording URL in session.end: {audio_url}")
+        # Store it for the session
+        session = await redis_client.get_session(session_id)
+        if session:
+            await redis_client.update_session(session_id, {"recording_url": audio_url})
+    
+    # Return SSE stream acknowledgment
+    async def end_stream():
+        # Just acknowledge the end, no content needed
+        yield "data: {}\n\n"
+    
+    return StreamingResponse(end_stream(), media_type="text/event-stream")
 
 
-async def handle_message(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle message/transcript event"""
+async def handle_session_update(data: Dict[str, Any]) -> StreamingResponse:
+    """Handle session.update event - for recording URLs and other updates"""
+    print(f"🔄 Session update: {data}")
+    
+    session_id = data.get("session_id") or data.get("call_id", "unknown")
+    recording_url = data.get("recording_url")
+    recording_status = data.get("recording_status")
+    
+    if recording_url:
+        print(f"🎵 Recording URL received: {recording_url}")
+        
+        # Get session and download audio
+        session = await redis_client.get_session(session_id)
+        if session and session.get("call_db_id"):
+            call_id = session["call_db_id"]
+            
+            # Store URL in database and download
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                result = await db.execute(
+                    select(Call).where(Call.id == call_id)
+                )
+                call = result.scalar_one_or_none()
+                
+                if call:
+                    call.audio_url = recording_url
+                    await db.commit()
+                    
+                    # Download audio in background
+                    try:
+                        local_path = await audio_service.download_audio(recording_url, call_id)
+                        if local_path:
+                            print(f"✅ Audio downloaded: {local_path}")
+                    except Exception as e:
+                        print(f"❌ Error downloading audio: {e}")
+    
+    # Return empty SSE stream
+    async def update_stream():
+        yield "data: {}\n\n"
+    
+    return StreamingResponse(update_stream(), media_type="text/event-stream")
+
+
+async def handle_message(data: Dict[str, Any]) -> StreamingResponse:
+    """Handle message/transcript event - user speech"""
     
     # Extract data (handle different Layercode formats)
     session_id = data.get("session_id") or data.get("call_id") or data.get("id", "unknown")
     call_sid = session_id  # Use session_id as call_sid
+    turn_id = data.get("turn_id", session_id)
     
     # Get transcript text
     transcript_text = (
@@ -140,14 +224,18 @@ async def handle_message(data: Dict[str, Any]) -> Dict[str, Any]:
         data.get("from") or 
         data.get("caller") or 
         data.get("phone_number") or
-        "unknown"
+        "web"
     )
     
-    print(f"📝 Message from {from_number}: {transcript_text[:100] if len(transcript_text) > 100 else transcript_text}")
+    print(f"📝 User message from {from_number}: {transcript_text[:100] if len(transcript_text) > 100 else transcript_text}")
     
     # Only process if we have text
     if not transcript_text.strip():
-        return {"status": "ok", "action": "continue"}
+        print(f"⚠️ Empty transcript received, skipping")
+        # Return empty SSE stream
+        async def empty_stream():
+            yield "data: {}\n\n"
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
     
     # Get or create session
     session = await redis_client.get_session(call_sid)
@@ -198,14 +286,19 @@ async def handle_message(data: Dict[str, Any]) -> Dict[str, Any]:
     # Add to context
     await redis_client.add_turn_to_context(call_sid, "agent", response_text)
     
-    # Return SSE stream with response
+    # Return SSE stream with response (with emotion metadata for Rime)
     turn_id = data.get("turn_id", call_sid)
+    
+    # Get appropriate emotion for the mode
+    emotion = layercode_service.get_emotion_for_mode(mode)
     
     async def response_stream():
         response_data = json.dumps({
             "type": "response.tts",
             "content": response_text,
-            "turn_id": turn_id
+            "turn_id": turn_id,
+            "emotion": emotion,  # Hint for Rime TTS
+            "speaker": "default"  # Use Rime's default speaker (can configure in Layercode)
         })
         yield f"data: {response_data}\n\n"
         
@@ -260,7 +353,12 @@ async def handle_call_end(request: Request):
         call_sid = data.get("call_sid", call_id)
         duration = data.get("duration_seconds", 0)
         
+        # Check for audio recording URL
+        audio_url = data.get("recording_url") or data.get("audio_url") or data.get("recordingUrl")
+        
         print(f"👋 Call ended: {call_sid}, duration: {duration}s")
+        if audio_url:
+            print(f"🎵 Audio URL received: {audio_url}")
         
         # Get session
         session = await redis_client.get_session(call_sid)
@@ -276,6 +374,21 @@ async def handle_call_end(request: Request):
                 if call:
                     call.end_time = datetime.utcnow()
                     call.duration_seconds = duration
+                    
+                    # Store audio URL and download audio file
+                    if audio_url:
+                        call.audio_url = audio_url
+                        
+                        # Download audio file asynchronously
+                        try:
+                            local_path = await audio_service.download_audio(audio_url, call.id)
+                            if local_path:
+                                print(f"✅ Audio saved locally: {local_path}")
+                            else:
+                                print(f"⚠️ Audio URL stored but download failed")
+                        except Exception as audio_error:
+                            print(f"❌ Error downloading audio: {audio_error}")
+                    
                     await db.commit()
                     
                     # Get full transcript for post-processing

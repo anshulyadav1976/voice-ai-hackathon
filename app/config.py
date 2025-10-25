@@ -37,8 +37,9 @@ class Settings(BaseSettings):
     openai_max_tokens: int = 100
     openai_temperature: float = 0.7
     
-    # Layercode (Optional)
+    # Layercode (Required for web calling)
     layercode_api_key: str = ""
+    layercode_agent_id: str = ""  # Your Layercode agent ID for web calling
     
     # Session Settings
     session_ttl_seconds: int = 7200  # 2 hours

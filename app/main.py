@@ -110,6 +110,12 @@ async def serve_stats():
     return FileResponse("templates/stats.html")
 
 
+@app.get("/talk.html")
+async def serve_talk():
+    """Serve web calling page"""
+    return FileResponse("templates/talk.html")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

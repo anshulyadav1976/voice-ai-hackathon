@@ -2,10 +2,12 @@
 Web UI API endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
+import os
 
 from app.database import get_db
 from app.models import User, Call, Transcript, Entity, Relation
@@ -18,8 +20,15 @@ from app.schemas import (
     GraphResponse,
     UserResponse
 )
+from app.services.audio_service import AudioService
+from app.services.export_service import ExportService
+from app.config import get_settings
+import httpx
 
 router = APIRouter()
+audio_service = AudioService()
+export_service = ExportService()
+settings = get_settings()
 
 
 @router.get("/calls", response_model=List[CallResponse])
@@ -88,10 +97,16 @@ async def get_call_details(
 @router.get("/calls/{call_id}/audio")
 async def get_call_audio(
     call_id: int,
+    download: bool = Query(False),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get audio URL for a call
+    Get audio file for download or streaming
+    Returns the local audio file if available, otherwise the URL
+    
+    Args:
+        call_id: The call ID
+        download: If True, forces download. If False, streams in browser
     """
     try:
         result = await db.execute(
@@ -102,16 +117,130 @@ async def get_call_audio(
         if not call:
             raise HTTPException(status_code=404, detail="Call not found")
         
-        if not call.audio_url:
-            raise HTTPException(status_code=404, detail="No audio available")
+        # Check for local audio file first
+        local_path = audio_service.get_audio_file_path(call_id)
         
-        return {"audio_url": call.audio_url}
+        if local_path and os.path.exists(local_path):
+            # Determine media type from file extension
+            ext = os.path.splitext(local_path)[1].lower()
+            media_types = {
+                '.wav': 'audio/wav',
+                '.mp3': 'audio/mpeg',
+                '.m4a': 'audio/mp4',
+                '.ogg': 'audio/ogg',
+                '.flac': 'audio/flac'
+            }
+            media_type = media_types.get(ext, 'audio/wav')
+            
+            # Get filename for download
+            filename = f"echodiary_call_{call_id}{ext}"
+            
+            # Serve local file
+            return FileResponse(
+                local_path,
+                media_type=media_type,
+                filename=filename,
+                headers={
+                    "Content-Disposition": f'{"attachment" if download else "inline"}; filename="{filename}"'
+                }
+            )
+        
+        # Fallback to URL if available
+        if call.audio_url:
+            return {"audio_url": call.audio_url, "local": False}
+        
+        raise HTTPException(status_code=404, detail="No audio recording available for this call")
         
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error getting audio: {e}")
-        raise HTTPException(status_code=500, detail="Error retrieving audio")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error retrieving audio: {str(e)}")
+
+
+@router.get("/calls/{call_id}/export/text")
+async def export_transcript_text(
+    call_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Export conversation transcript as clean formatted text
+    """
+    try:
+        # Get call with transcripts
+        result = await db.execute(
+            select(Call)
+            .where(Call.id == call_id)
+            .options(selectinload(Call.transcripts))
+        )
+        call = result.scalar_one_or_none()
+        
+        if not call:
+            raise HTTPException(status_code=404, detail="Call not found")
+        
+        if not call.transcripts:
+            raise HTTPException(status_code=404, detail="No transcript available")
+        
+        # Format transcript
+        formatted_text = export_service.format_transcript_text(call, call.transcripts)
+        filename = export_service.get_filename(call, "txt")
+        
+        return PlainTextResponse(
+            content=formatted_text,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error exporting transcript: {e}")
+        raise HTTPException(status_code=500, detail="Error exporting transcript")
+
+
+@router.get("/calls/{call_id}/export/markdown")
+async def export_transcript_markdown(
+    call_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Export conversation transcript as Markdown
+    """
+    try:
+        # Get call with transcripts
+        result = await db.execute(
+            select(Call)
+            .where(Call.id == call_id)
+            .options(selectinload(Call.transcripts))
+        )
+        call = result.scalar_one_or_none()
+        
+        if not call:
+            raise HTTPException(status_code=404, detail="Call not found")
+        
+        if not call.transcripts:
+            raise HTTPException(status_code=404, detail="No transcript available")
+        
+        # Format transcript
+        formatted_md = export_service.format_transcript_markdown(call, call.transcripts)
+        filename = export_service.get_filename(call, "md")
+        
+        return PlainTextResponse(
+            content=formatted_md,
+            media_type="text/markdown",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error exporting transcript: {e}")
+        raise HTTPException(status_code=500, detail="Error exporting transcript")
 
 
 @router.get("/graph", response_model=GraphResponse)
@@ -308,4 +437,81 @@ async def get_user_stats(
     except Exception as e:
         print(f"Error getting stats: {e}")
         raise HTTPException(status_code=500, detail="Error retrieving statistics")
+
+
+@router.get("/config")
+async def get_frontend_config():
+    """
+    Get configuration for frontend (non-sensitive data only)
+    """
+    return {
+        "layercode_agent_id": settings.layercode_agent_id,
+        "app_name": settings.app_name,
+        "app_version": settings.app_version
+    }
+
+
+@router.post("/authorize")
+async def authorize_layercode_session(request: dict):
+    """
+    Authorization endpoint for Layercode Web SDK
+    
+    This endpoint is called by the Layercode JS SDK to get a client_session_key.
+    It acts as a secure proxy between the frontend and Layercode API.
+    
+    Based on: https://docs.layercode.com/sdk-reference/vanilla-js-sdk
+    """
+    try:
+        # Validate API key is configured
+        if not settings.layercode_api_key:
+            raise HTTPException(
+                status_code=500, 
+                detail="Layercode API key not configured"
+            )
+        
+        # The JS SDK will send agent_id, metadata, etc.
+        agent_id = request.get("agent_id") or settings.layercode_agent_id
+        
+        if not agent_id:
+            raise HTTPException(
+                status_code=400,
+                detail="agent_id is required"
+            )
+        
+        # Call Layercode authorization API
+        layercode_auth_url = "https://api.layercode.com/v1/agents/web/authorize_session"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                layercode_auth_url,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {settings.layercode_api_key}"
+                },
+                json=request
+            )
+            
+            if not response.is_success:
+                error_text = response.text
+                print(f"❌ Layercode authorization failed: {error_text}")
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Layercode authorization failed: {error_text}"
+                )
+            
+            auth_data = response.json()
+            print(f"✅ Layercode session authorized: {auth_data.get('conversation_id', 'new session')}")
+            
+            return auth_data
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in Layercode authorization: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Authorization error: {str(e)}"
+        )
 

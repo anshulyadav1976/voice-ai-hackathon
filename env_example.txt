@@ -58,10 +58,11 @@ OPENAI_MAX_TOKENS=100
 OPENAI_TEMPERATURE=0.7
 
 # ============================================
-# Layercode (Optional - Service Orchestration)
-# Get from: https://layercode.com/
+# Layercode (Required - No-code Voice Pipeline & Web Calling)
+# Get from: https://dashboard.layercode.com/
 # ============================================
 LAYERCODE_API_KEY=your_layercode_api_key_here
+LAYERCODE_AGENT_ID=agent_xxxxxxxxxxxxxxxx
 
 # ============================================
 # Session Settings
