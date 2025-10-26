@@ -95,9 +95,21 @@ async def handle_session_start(data: Dict[str, Any]) -> StreamingResponse:
     session_id = data.get("session_id") or data.get("call_id", "unknown")
     from_number = data.get("from") or data.get("caller", "unknown")
     turn_id = data.get("turn_id", session_id)
+    conversation_id = data.get("conversation_id")
     
-    # Get metadata from Layercode (includes mode, context_call_id, etc)
-    metadata = data.get("metadata", {})
+    # Get metadata from Layercode (might be in different locations)
+    metadata = data.get("metadata") or data.get("custom_data") or {}
+    
+    # Also check if metadata is stored in Redis from the authorize endpoint
+    if conversation_id and not metadata:
+        # Try to get metadata from Redis using conversation_id
+        stored_metadata = await redis_client.get_value(f"conversation_metadata:{conversation_id}")
+        if stored_metadata:
+            import json
+            metadata = json.loads(stored_metadata)
+            print(f"✅ Retrieved metadata from Redis: {metadata}")
+    
+    print(f"🔍 Metadata received: {metadata}")
     
     # Initialize session with metadata
     session = await initialize_session(session_id, from_number, metadata)

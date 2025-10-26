@@ -59,6 +59,26 @@ class RedisClient:
             print(f"Error deleting session: {e}")
             return False
     
+    async def set_value(self, key: str, value: str, expiry: int = None) -> bool:
+        """Store a generic key-value pair with optional expiry (in seconds)"""
+        try:
+            if expiry:
+                self.client.set(key, value, ex=expiry)
+            else:
+                self.client.set(key, value)
+            return True
+        except Exception as e:
+            print(f"Error setting value for key {key}: {e}")
+            return False
+    
+    async def get_value(self, key: str) -> Optional[str]:
+        """Retrieve a generic value by key"""
+        try:
+            return self.client.get(key)
+        except Exception as e:
+            print(f"Error getting value for key {key}: {e}")
+            return None
+    
     async def set_user_profile(self, user_id: int, data: Dict[str, Any]) -> bool:
         """Store user profile data"""
         key = f"user:{user_id}"

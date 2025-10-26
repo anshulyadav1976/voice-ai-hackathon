@@ -508,7 +508,16 @@ async def authorize_layercode_session(request: dict):
                 )
             
             auth_data = response.json()
-            print(f"✅ Layercode session authorized: {auth_data.get('conversation_id', 'new session')}")
+            conversation_id = auth_data.get('conversation_id')
+            print(f"✅ Layercode session authorized: {conversation_id or 'new session'}")
+            
+            # Store metadata in Redis for later retrieval in webhook
+            if conversation_id and request.get("metadata"):
+                from app.redis_client import redis_client
+                import json
+                metadata_key = f"conversation_metadata:{conversation_id}"
+                await redis_client.set_value(metadata_key, json.dumps(request["metadata"]), expiry=3600)  # 1 hour
+                print(f"💾 Stored metadata for conversation {conversation_id}: {request['metadata']}")
             
             return auth_data
             
