@@ -59,3 +59,7 @@ htmlcov/
 # Alembic
 alembic/versions/*.pyc
 
+# Demo/test scripts
+add_demo_data.py
+clear_demo_data.py
+

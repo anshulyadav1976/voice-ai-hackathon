@@ -14,7 +14,7 @@ from app.redis_client import redis_client
 from app.services.openai_service import OpenAIService
 from app.services.layercode_service import LayercodeService
 from app.services.audio_service import AudioService
-from app.tasks import extract_and_store_entities, calculate_and_store_mood
+from app.tasks import extract_and_store_entities, calculate_and_store_mood, generate_call_title
 from sqlalchemy import select
 
 router = APIRouter()
@@ -96,20 +96,28 @@ async def handle_session_start(data: Dict[str, Any]) -> StreamingResponse:
     from_number = data.get("from") or data.get("caller", "unknown")
     turn_id = data.get("turn_id", session_id)
     
-    # Initialize session
-    await initialize_session(session_id, from_number)
+    # Get metadata from Layercode (includes mode, context_call_id, etc)
+    metadata = data.get("metadata", {})
+    
+    # Initialize session with metadata
+    session = await initialize_session(session_id, from_number, metadata)
     
     # Return SSE stream with welcome message
     async def welcome_stream():
-        # More natural, varied welcome messages
-        import random
-        welcomes = [
-            "Hey, I'm Echo. I'm here for you. What's on your mind?",
-            "Hi! I'm Echo. Just so you know, this is your space. What's going on?",
-            "Hey there! I'm Echo, and I'm all ears. What's happening with you?",
-            "Hi! I'm Echo. Whatever you need to talk about, I'm here. What's up?"
-        ]
-        welcome_text = random.choice(welcomes)
+        # Check if this is a continuation of a previous conversation
+        if session.get("has_context"):
+            context_summary = session.get("context_summary", "that conversation")
+            welcome_text = f"Hey! I remember our conversation about {context_summary}. Want to talk more about that?"
+        else:
+            # More natural, varied welcome messages
+            import random
+            welcomes = [
+                "Hey, I'm Echo. I'm here for you. What's on your mind?",
+                "Hi! I'm Echo. Just so you know, this is your space. What's going on?",
+                "Hey there! I'm Echo, and I'm all ears. What's happening with you?",
+                "Hi! I'm Echo. Whatever you need to talk about, I'm here. What's up?"
+            ]
+            welcome_text = random.choice(welcomes)
         
         response_data = json.dumps({
             "type": "response.tts",
@@ -164,10 +172,10 @@ async def handle_session_update(data: Dict[str, Any]) -> StreamingResponse:
     recording_url = data.get("recording_url")
     recording_status = data.get("recording_status")
     
-    if recording_url:
-        print(f"🎵 Recording URL received: {recording_url}")
+    if recording_url and recording_status == "completed":
+        print(f"🎵 Recording completed, URL received: {recording_url}")
         
-        # Get session and download audio
+        # Get session and process
         session = await redis_client.get_session(session_id)
         if session and session.get("call_db_id"):
             call_id = session["call_db_id"]
@@ -191,6 +199,32 @@ async def handle_session_update(data: Dict[str, Any]) -> StreamingResponse:
                             print(f"✅ Audio downloaded: {local_path}")
                     except Exception as e:
                         print(f"❌ Error downloading audio: {e}")
+                    
+                    # Also trigger entity extraction if we haven't already
+                    # Get full transcript
+                    transcript_result = await db.execute(
+                        select(Transcript)
+                        .where(Transcript.call_id == call_id)
+                        .order_by(Transcript.timestamp)
+                    )
+                    transcripts = transcript_result.scalars().all()
+                    
+                    if transcripts:
+                        full_transcript = "\n".join([
+                            f"{t.speaker}: {t.text}"
+                            for t in transcripts
+                        ])
+                        
+                        # Trigger background processing
+                        print(f"🔄 Starting background processing for call {call_id}")
+                        try:
+                            await extract_and_store_entities(call_id, full_transcript)
+                            await calculate_and_store_mood(call_id, full_transcript)
+                            await generate_call_title(call_id, full_transcript)
+                        except Exception as e:
+                            print(f"❌ Background processing error: {e}")
+                            import traceback
+                            traceback.print_exc()
     
     # Return empty SSE stream
     async def update_stream():
@@ -241,8 +275,9 @@ async def handle_message(data: Dict[str, Any]) -> StreamingResponse:
     session = await redis_client.get_session(call_sid)
     
     if not session:
-        # First message - initialize session
-        session = await initialize_session(call_sid, from_number)
+        # First message - initialize session (might have metadata from Layercode)
+        metadata = data.get("metadata", {})
+        session = await initialize_session(call_sid, from_number, metadata)
     
     # Store user transcript in database
     async with AsyncSessionLocal() as db:
@@ -262,10 +297,16 @@ async def handle_message(data: Dict[str, Any]) -> StreamingResponse:
     context = await redis_client.get_context(call_sid)
     mode = session.get("mode", "reassure")
     
+    # Add context awareness if this is a continuation
+    context_prefix = ""
+    if session.get("has_context"):
+        context_summary = session.get("context_summary", "our previous conversation")
+        context_prefix = f"[Context: We previously talked about {context_summary}] "
+    
     # Generate GPT response
     print(f"🤖 Generating response in '{mode}' mode...")
     response_text = await openai_service.generate_response(
-        transcript=transcript_text,
+        transcript=context_prefix + transcript_text,
         context=context,
         mode=mode
     )
@@ -323,8 +364,11 @@ async def handle_call_start(request: Request):
         
         print(f"📞 Call started from {from_number}")
         
-        # Initialize session
-        await initialize_session(call_sid, from_number)
+        # Get metadata if available
+        metadata = data.get("metadata", {})
+        
+        # Initialize session with metadata
+        await initialize_session(call_sid, from_number, metadata)
         
         # Return initial greeting
         return layercode_service.format_response(
@@ -407,10 +451,11 @@ async def handle_call_end(request: Request):
                     
                     # Trigger background processing immediately
                     if full_transcript:
-                        print(f"🔄 Starting entity extraction for call {call.id}")
+                        print(f"🔄 Starting background processing for call {call.id}")
                         try:
                             await extract_and_store_entities(call.id, full_transcript)
                             await calculate_and_store_mood(call.id, full_transcript)
+                            await generate_call_title(call.id, full_transcript)
                         except Exception as e:
                             print(f"❌ Background processing error: {e}")
             
@@ -424,10 +469,11 @@ async def handle_call_end(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-async def initialize_session(call_sid: str, from_number: str) -> Dict[str, Any]:
+async def initialize_session(call_sid: str, from_number: str, metadata: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Initialize a new call session
     Creates user and call records, sets up Redis session
+    Supports loading context from previous conversations
     """
     async with AsyncSessionLocal() as db:
         # Get or create user
@@ -440,6 +486,9 @@ async def initialize_session(call_sid: str, from_number: str) -> Dict[str, Any]:
             user = User(phone_number=from_number)
             db.add(user)
             await db.flush()
+        
+        # Get mode from metadata or use user preference
+        mode = metadata.get("mode", user.preferred_mode) if metadata else user.preferred_mode
         
         # Check if call already exists (for repeated test calls)
         call_result = await db.execute(
@@ -454,7 +503,7 @@ async def initialize_session(call_sid: str, from_number: str) -> Dict[str, Any]:
                 call_sid=call_sid,
                 from_number=from_number,
                 start_time=datetime.utcnow(),
-                mode=user.preferred_mode
+                mode=mode
             )
             db.add(call)
             await db.commit()
@@ -466,9 +515,42 @@ async def initialize_session(call_sid: str, from_number: str) -> Dict[str, Any]:
             "user_id": user.id,
             "call_db_id": call.id,
             "start_time": datetime.utcnow().isoformat(),
-            "mode": user.preferred_mode,
+            "mode": mode,
             "turns": []
         }
+        
+        # Handle context from previous conversation if provided
+        if metadata and metadata.get("context_call_id"):
+            context_call_id = metadata["context_call_id"]
+            print(f"🔗 Loading context from previous call {context_call_id}")
+            
+            try:
+                # Load previous conversation
+                context_result = await db.execute(
+                    select(Call).where(Call.id == int(context_call_id))
+                )
+                context_call = context_result.scalar_one_or_none()
+                
+                if context_call:
+                    # Load transcripts from context call
+                    transcript_result = await db.execute(
+                        select(Transcript)
+                        .where(Transcript.call_id == context_call_id)
+                        .order_by(Transcript.timestamp)
+                    )
+                    context_transcripts = transcript_result.scalars().all()
+                    
+                    # Build context summary for session
+                    context_summary = context_call.summary or "previous conversation"
+                    session_data["has_context"] = True
+                    session_data["context_call_id"] = context_call_id
+                    session_data["context_summary"] = context_summary
+                    
+                    print(f"✅ Loaded context: '{context_summary}' with {len(context_transcripts)} messages")
+                else:
+                    print(f"⚠️ Context call {context_call_id} not found")
+            except Exception as e:
+                print(f"❌ Error loading context: {e}")
         
         await redis_client.set_session(call_sid, session_data)
         

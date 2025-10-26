@@ -279,7 +279,15 @@ async def get_knowledge_graph(
         
         # Convert to response models
         nodes = [EntityResponse.model_validate(e) for e in entities]
-        edges = [RelationResponse.model_validate(r) for r in relations]
+        edges = []
+        
+        for r in relations:
+            try:
+                edge_data = RelationResponse.model_validate(r)
+                edges.append(edge_data)
+            except Exception as e:
+                print(f"⚠️ Skipping invalid relation: {e}")
+                continue
         
         return GraphResponse(nodes=nodes, edges=edges)
         

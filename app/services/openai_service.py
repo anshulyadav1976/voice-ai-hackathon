@@ -167,43 +167,82 @@ class OpenAIService:
         """
         try:
             prompt = f"""
-Extract entities and relations from this conversation transcript.
+You are analyzing a personal diary conversation. Extract meaningful entities and their relationships.
 
-Transcript: {transcript}
+Focus on extracting:
+- **People**: Names of people mentioned (friends, family, colleagues)
+- **Places**: Locations mentioned (work, home, gym, coffee shop, cities)
+- **Organizations**: Companies, teams, groups mentioned
+- **Topics**: Main subjects discussed (project, deadline, meeting, workout)
+- **Emotions**: Strong feelings expressed (anxiety, joy, stress, excitement)
 
-Return a JSON object with:
-- "entities": list of {{name, type, properties}} where type is: Person, Place, Org, Topic, or Emotion
-- "relations": list of {{entity1, entity2, relation_type}} where relation_type is: met_with, argued_with, worked_on, felt, or went_to
+Rules:
+- Extract specific names, not pronouns like "I" or "they"
+- Only extract entities that are clearly mentioned
+- Keep entity names short and clear
+- For relations, connect entities that have direct relationships in the conversation
 
-Example:
+Conversation transcript:
+{transcript}
+
+Return JSON in this EXACT format:
 {{
   "entities": [
-    {{"name": "Sarah", "type": "Person", "properties": {{"role": "colleague"}}}},
-    {{"name": "stressed", "type": "Emotion", "properties": {{"intensity": "high"}}}}
+    {{"name": "EntityName", "type": "Person", "properties": {{"role": "colleague"}}}},
+    {{"name": "Another Entity", "type": "Place", "properties": {{}}}}
   ],
   "relations": [
-    {{"entity1": "I", "entity2": "Sarah", "relation_type": "argued_with"}}
+    {{"entity1": "EntityName", "entity2": "Another Entity", "relation_type": "met_at", "context": "brief description"}}
   ]
 }}
 
-Return only valid JSON, no other text.
+Valid types: Person, Place, Org, Topic, Emotion
+Valid relation_types: met_with, talked_about, worked_on, felt_about, went_to, argued_with, worried_about
+
+Return ONLY valid JSON, no explanation or other text.
 """
             
             response = await self.client.chat.completions.create(
                 model=settings.openai_model,
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that extracts structured data."},
+                    {"role": "system", "content": "You are an expert at extracting structured knowledge from conversations. Always return valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.3
+                temperature=0.3,
+                max_tokens=1000
             )
             
             import json
-            return json.loads(response.choices[0].message.content)
+            result = json.loads(response.choices[0].message.content)
+            
+            # Validate structure
+            if not isinstance(result.get("entities"), list):
+                result["entities"] = []
+            if not isinstance(result.get("relations"), list):
+                result["relations"] = []
+            
+            # Clean up entity names and types
+            cleaned_entities = []
+            for entity in result.get("entities", []):
+                if entity.get("name") and entity.get("type"):
+                    # Don't extract pronouns or generic words
+                    if entity["name"].lower() not in ["i", "me", "you", "they", "them", "us", "we", "he", "she", "it"]:
+                        cleaned_entities.append({
+                            "name": entity["name"].strip(),
+                            "type": entity["type"].strip(),
+                            "properties": entity.get("properties", {})
+                        })
+            
+            result["entities"] = cleaned_entities
+            
+            print(f"✨ Extracted {len(result['entities'])} entities and {len(result['relations'])} relations")
+            return result
             
         except Exception as e:
-            print(f"Error extracting entities: {e}")
+            print(f"❌ Error extracting entities: {e}")
+            import traceback
+            traceback.print_exc()
             return {"entities": [], "relations": []}
     
     async def calculate_mood_score(self, transcript: str) -> Dict:

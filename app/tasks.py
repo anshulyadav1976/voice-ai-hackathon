@@ -186,13 +186,13 @@ async def schedule_checkin(call: Call, mood_data: Dict):
             await db.rollback()
 
 
-async def generate_call_summary(call_id: int):
+async def generate_call_title(call_id: int, transcript_text: str):
     """
-    Generate a summary of the call using GPT
+    Generate a short, descriptive title for the call using GPT
     """
     async with AsyncSessionLocal() as db:
         try:
-            # Get call with transcripts
+            # Get call
             result = await db.execute(
                 select(Call).where(Call.id == call_id)
             )
@@ -201,46 +201,44 @@ async def generate_call_summary(call_id: int):
             if not call:
                 return
             
-            # Get transcripts
-            transcript_result = await db.execute(
-                select(Transcript)
-                .where(Transcript.call_id == call_id)
-                .order_by(Transcript.timestamp)
-            )
-            transcripts = transcript_result.scalars().all()
-            
-            if not transcripts:
-                return
-            
-            # Combine transcript text
-            full_text = "\n".join([
-                f"{t.speaker}: {t.text}"
-                for t in transcripts
-            ])
-            
-            # Generate summary
+            # Generate title using GPT
             prompt = f"""
-Summarize this diary call conversation in 2-3 sentences.
-Focus on key topics, emotions, and important moments.
+Generate a short, descriptive title (5-8 words max) for this diary conversation.
+The title should capture the main topic or emotion discussed.
+
+Examples of good titles:
+- "Stressed about work deadline"
+- "Excited about new promotion"
+- "Worried about relationship with Sarah"
+- "Feeling anxious about presentation"
+- "Happy about gym progress"
+- "Reflecting on family visit"
 
 Conversation:
-{full_text}
+{transcript_text}
 
-Return only the summary text.
+Return ONLY the title, nothing else. No quotes, no punctuation at the end.
 """
             
-            summary = await openai_service.generate_response(
+            title = await openai_service.generate_response(
                 transcript=prompt,
                 context=[],
                 mode="listener"
             )
             
-            call.summary = summary
+            # Clean up the title
+            title = title.strip().strip('"').strip("'").strip('.')
+            
+            # Limit length
+            if len(title) > 80:
+                title = title[:77] + "..."
+            
+            call.summary = title
             await db.commit()
             
-            print(f"✅ Generated summary for call {call_id}")
+            print(f"✅ Generated title for call {call_id}: '{title}'")
             
         except Exception as e:
-            print(f"Error generating summary: {e}")
+            print(f"❌ Error generating title: {e}")
             await db.rollback()
 

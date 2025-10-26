@@ -193,6 +193,12 @@
             <p>Have a conversation with your AI companion</p>
         </div>
 
+        <!-- Context banner -->
+        <div id="context-banner" style="display: none; background: linear-gradient(135deg, #667EEA 0%, #764BA2 100%); color: white; padding: 16px; border-radius: 12px; margin-bottom: 20px; text-align: center;">
+            <p style="margin: 0; font-weight: 600;">💬 Continuing conversation from: <span id="context-title"></span></p>
+            <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.9;">Echo remembers this conversation and will respond accordingly</p>
+        </div>
+
         <div class="call-container">
             <div class="call-interface">
                 <div class="call-status" id="status">Ready to talk</div>
@@ -255,6 +261,39 @@
         let selectedMode = 'reassure';
         let startTime = null;
         let durationInterval = null;
+        let contextCallId = null;
+        let contextData = null;
+
+        // Check for context parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        contextCallId = urlParams.get('context_call_id');
+
+        // Load context if provided
+        if (contextCallId) {
+            loadContext(contextCallId);
+        }
+
+        async function loadContext(callId) {
+            try {
+                const response = await fetch(`/api/calls/${callId}`);
+                const call = await response.json();
+                
+                contextData = {
+                    call_id: callId,
+                    summary: call.summary || 'previous conversation',
+                    mood_score: call.mood_score,
+                    transcripts: call.transcripts
+                };
+
+                // Show context banner
+                document.getElementById('context-banner').style.display = 'block';
+                document.getElementById('context-title').textContent = call.summary || 'Previous conversation';
+                
+                console.log('✅ Loaded context from call:', callId);
+            } catch (error) {
+                console.error('❌ Error loading context:', error);
+            }
+        }
 
         // Mode selection
         document.querySelectorAll('.mode-btn').forEach(btn => {
@@ -295,15 +334,23 @@
                     throw new Error('Layercode agent not configured. Please set LAYERCODE_AGENT_ID in your .env file.');
                 }
 
-                // Initialize Layercode client
+                // Initialize Layercode client with optional context
+                const metadata = { 
+                    mode: selectedMode,
+                    source: 'web',
+                    timestamp: new Date().toISOString()
+                };
+
+                // Add context if available
+                if (contextCallId) {
+                    metadata.context_call_id = contextCallId;
+                    metadata.has_context = true;
+                }
+
                 layercodeClient = new LayercodeClient({
                     agentId: config.layercode_agent_id,
                     authorizeSessionEndpoint: '/api/authorize',
-                    metadata: { 
-                        mode: selectedMode,
-                        source: 'web',
-                        timestamp: new Date().toISOString()
-                    },
+                    metadata: metadata,
                     onConnect: ({ conversationId, config }) => {
                         console.log('Connected to Layercode!', conversationId);
                         isConnected = true;

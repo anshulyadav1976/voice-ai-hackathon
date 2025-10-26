@@ -127,15 +127,70 @@
             const width = document.getElementById('knowledge-graph').offsetWidth;
             const height = 600;
             
+            // Validate and clean data
+            console.log('Raw data:', data);
+            
+            // Ensure all nodes have valid IDs
+            const validNodes = data.nodes.filter(n => n && n.id !== null && n.id !== undefined);
+            console.log('Valid nodes:', validNodes.length);
+            
+            // Create a Set of valid node IDs for quick lookup
+            const validNodeIds = new Set(validNodes.map(n => n.id));
+            
+            // Filter edges to only include those with valid source and target nodes
+            const validEdges = data.edges.filter(e => {
+                // Extract source and target IDs from different possible formats
+                const sourceId = e.entity1?.id || e.entity1_id || e.source?.id || e.source;
+                const targetId = e.entity2?.id || e.entity2_id || e.target?.id || e.target;
+                
+                const hasValidSource = sourceId && validNodeIds.has(sourceId);
+                const hasValidTarget = targetId && validNodeIds.has(targetId);
+                
+                if (!hasValidSource || !hasValidTarget) {
+                    console.warn('Skipping edge with invalid nodes:', {
+                        sourceId,
+                        targetId,
+                        edge: e
+                    });
+                    return false;
+                }
+                
+                return true;
+            });
+            
+            console.log('Valid edges:', validEdges.length);
+            
+            // Normalize edge data - ensure source and target are node IDs
+            const normalizedEdges = validEdges.map(e => {
+                const sourceId = e.entity1?.id || e.entity1_id || e.source?.id || e.source;
+                const targetId = e.entity2?.id || e.entity2_id || e.target?.id || e.target;
+                
+                return {
+                    source: sourceId,
+                    target: targetId,
+                    relation_type: e.relation_type || e.type || 'related_to',
+                    value: 1
+                };
+            });
+            
             // Create SVG
             const svg = d3.select('#knowledge-graph')
                 .append('svg')
                 .attr('width', width)
                 .attr('height', height);
             
+            // Add zoom behavior
+            const g = svg.append('g');
+            
+            svg.call(d3.zoom()
+                .scaleExtent([0.1, 4])
+                .on('zoom', (event) => {
+                    g.attr('transform', event.transform);
+                }));
+            
             // Create force simulation
-            const simulation = d3.forceSimulation(data.nodes)
-                .force('link', d3.forceLink(data.edges)
+            const simulation = d3.forceSimulation(validNodes)
+                .force('link', d3.forceLink(normalizedEdges)
                     .id(d => d.id)
                     .distance(100))
                 .force('charge', d3.forceManyBody().strength(-300))
@@ -143,17 +198,30 @@
                 .force('collision', d3.forceCollide().radius(30));
             
             // Create links
-            const link = svg.append('g')
+            const link = g.append('g')
+                .attr('class', 'links')
                 .selectAll('line')
-                .data(data.edges)
+                .data(normalizedEdges)
                 .join('line')
-                .attr('class', 'link')
-                .attr('stroke-width', d => Math.sqrt(d.value || 1));
+                .attr('stroke', '#999')
+                .attr('stroke-opacity', 0.6)
+                .attr('stroke-width', d => Math.sqrt(d.value || 1) * 2);
+            
+            // Add link labels
+            const linkLabels = g.append('g')
+                .attr('class', 'link-labels')
+                .selectAll('text')
+                .data(normalizedEdges)
+                .join('text')
+                .attr('font-size', '10px')
+                .attr('fill', '#666')
+                .text(d => d.relation_type?.replace(/_/g, ' '));
             
             // Create nodes
-            const node = svg.append('g')
+            const node = g.append('g')
+                .attr('class', 'nodes')
                 .selectAll('g')
-                .data(data.nodes)
+                .data(validNodes)
                 .join('g')
                 .attr('class', 'node')
                 .call(drag(simulation));
@@ -183,6 +251,10 @@
                     .attr('y1', d => d.source.y)
                     .attr('x2', d => d.target.x)
                     .attr('y2', d => d.target.y);
+                
+                linkLabels
+                    .attr('x', d => (d.source.x + d.target.x) / 2)
+                    .attr('y', d => (d.source.y + d.target.y) / 2);
                 
                 node
                     .attr('transform', d => `translate(${d.x},${d.y})`);
